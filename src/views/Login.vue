@@ -48,14 +48,49 @@ export default {
 .auth-container {
   max-width: 400px;
   margin: 100px auto;
-  padding: 20px;
-  border-radius: 10px;
-  border: 1px solid #ddd;
+  padding: 30px;
+  background-color: #2c2c3b;
+  color: white;
+  border-radius: 12px;
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
-input,
+input {
+  padding: 10px;
+  margin-bottom: 15px;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  width: 100%; /* Растягиваем поля на всю ширину формы */
+  box-sizing: border-box;
+}
 button {
-  display: block;
-  width: 100%;
-  margin-bottom: 10px;
+  padding: 12px;
+  background-color: #0088cc;
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  width: 100%; /* Кнопка на всю ширину */
+}
+p {
+  text-align: center;
+  margin-top: 15px;
+}
+a {
+  color: #00aaff;
+  text-decoration: none;
+}
+body {
+  min-height: 100vh;
+  background-color: #505060;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  font-family: "Inter", Arial, sans-serif;
 }
 </style>

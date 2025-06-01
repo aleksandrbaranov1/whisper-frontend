@@ -11,6 +11,12 @@ const routes = [
     meta: { title: "Whisper" },
   },
   {
+    path: "/login",
+    component: Login,
+    meta: { title: "Whisper" },
+  },
+
+  {
     path: "/register",
     component: Register,
     meta: { title: "Whisper" },

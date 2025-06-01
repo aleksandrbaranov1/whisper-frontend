@@ -2,9 +2,44 @@
   <div class="chat-page">
     <!-- Боковая панель -->
     <aside class="sidebar">
-      <button class="profile-button" @click="$router.push('/me')">👤</button>
+      <div class="sidebar-header">
+        <button class="profile-button" @click="$router.push('/me')">👤</button>
+        <button
+          class="new-chat-button"
+          @click="toggleSearch"
+          :title="'Новый чат'"
+        >
+          💬
+        </button>
+      </div>
 
-      <div class="chat-list">
+      <div v-if="showSearch" class="search-block">
+        <input
+          v-model="searchQuery"
+          @input="onSearch"
+          class="search-input"
+          placeholder="Поиск пользователя..."
+          autocomplete="off"
+        />
+        <div class="search-list">
+          <div
+            v-for="user in filteredUsers"
+            :key="user.id"
+            class="search-item"
+            @click="startChatWith(user)"
+          >
+            {{ user.name }}
+          </div>
+          <div
+            v-if="searchQuery && filteredUsers.length === 0"
+            class="search-empty"
+          >
+            Пользователь не найден
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-list" v-if="!showSearch">
         <div
           class="chat-item"
           v-for="chat in chats"
@@ -20,6 +55,11 @@
     <!-- Зона сообщений -->
     <main class="chat-window">
       <div v-if="selectedChat" class="chat-content">
+        <div class="chat-header">
+          <span class="chat-title">
+            {{ getOtherParticipantName(selectedChat.participants) }}
+          </span>
+        </div>
         <div class="messages" ref="messagesContainer">
           <div
             v-for="message in messages"
@@ -61,6 +101,9 @@ const currentUserId = ref(null);
 const newMessage = ref("");
 const messagesContainer = ref(null);
 const stompClient = ref(null);
+const showSearch = ref(false);
+const searchQuery = ref("");
+const filteredUsers = ref([]);
 
 const fetchProfile = async () => {
   const token = localStorage.getItem("token");
@@ -147,6 +190,61 @@ const formatTime = (timestamp) => {
   return `${hours}:${minutes}`;
 };
 
+const toggleSearch = () => {
+  showSearch.value = !showSearch.value;
+  searchQuery.value = "";
+  filteredUsers.value = [];
+};
+
+const onSearch = async () => {
+  if (!searchQuery.value.trim()) {
+    filteredUsers.value = [];
+    return;
+  }
+  const token = localStorage.getItem("token");
+  const res = await fetch(
+    `http://localhost:8080/api/chats/searchUsers?name=${encodeURIComponent(
+      searchQuery.value
+    )}`,
+    {
+      headers: { Authorization: "Bearer " + token },
+    }
+  );
+  if (res.ok) {
+    // Ответ — массив имён, преобразуем в объекты для v-for
+    const names = await res.json();
+    filteredUsers.value = names.map((name) => ({ name }));
+  } else {
+    filteredUsers.value = [];
+  }
+};
+
+const startChatWith = async (user) => {
+  const token = localStorage.getItem("token");
+  const res = await fetch(
+    `http://localhost:8080/api/chats/private?user2Name=${encodeURIComponent(
+      user.name
+    )}`,
+    {
+      method: "POST",
+      headers: { Authorization: "Bearer " + token },
+    }
+  );
+  if (res.ok) {
+    await fetchChats();
+    showSearch.value = false;
+    searchQuery.value = "";
+    filteredUsers.value = [];
+    // Найти только что созданный чат и выбрать его
+    const newChat = chats.value.find((chat) =>
+      chat.participants.some((p) => p.name === user.name)
+    );
+    if (newChat) selectChat(newChat);
+  } else {
+    alert("Не удалось создать чат");
+  }
+};
+
 onMounted(async () => {
   try {
     await fetchProfile();
@@ -214,6 +312,21 @@ onBeforeUnmount(() => {
   border-right: 1px solid #444;
 }
 
+/* Заголовок сайдбара */
+.sidebar-header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.profile-button,
+.new-chat-button {
+  margin: 0; /* Убираем внешние отступы */
+}
+
 /* Кнопка профиля */
 .profile-button {
   width: 48px;
@@ -228,6 +341,65 @@ onBeforeUnmount(() => {
 }
 .profile-button:hover {
   background-color: #666;
+}
+
+/* Кнопка нового чата */
+.new-chat-button {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 16px;
+  border-radius: 50%;
+  border: none;
+  background-color: #0088cc;
+  color: white;
+  font-size: 22px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+.new-chat-button:hover {
+  background-color: #0077b3;
+}
+
+.search-block {
+  padding: 10px;
+  background: #232336;
+  border-radius: 10px;
+  margin: 0 10px 16px 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+.search-input {
+  width: 100%;
+  padding: 10px;
+  border-radius: 8px;
+  border: none;
+  font-size: 16px;
+  margin-bottom: 8px;
+  background: #2d2d3a;
+  color: white;
+}
+.search-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+.search-item {
+  padding: 10px;
+  border-radius: 6px;
+  background: #3a3a4a;
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.search-item:hover {
+  background: #0088cc;
+  color: white;
+}
+.search-empty {
+  color: #888;
+  text-align: center;
+  padding: 10px 0;
 }
 
 /* Чат-лист */
@@ -272,7 +444,6 @@ onBeforeUnmount(() => {
   gap: 10px;
   overflow-y: auto;
   padding: 20px;
-  padding-bottom: 80px;
 }
 .message {
   max-width: 60%;
@@ -303,10 +474,6 @@ onBeforeUnmount(() => {
 /* Поле ввода сообщения */
 .message-input {
   display: flex;
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
   padding: 12px 16px;
   background-color: #1e1e2f;
   border-top: 1px solid #333;
@@ -344,6 +511,9 @@ onBeforeUnmount(() => {
 .message-input button:hover {
   background-color: #0077b3;
 }
+body {
+  font-family: "Inter", Arial, sans-serif;
+}
 
 /* Заглушка */
 .placeholder {
@@ -351,5 +521,20 @@ onBeforeUnmount(() => {
   text-align: center;
   color: #888;
   font-size: 18px;
+}
+
+.chat-header {
+  padding: 16px 24px 8px 24px;
+  background: #232336;
+  border-bottom: 1px solid #333;
+  font-size: 20px;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: 0.5px;
+}
+
+.chat-title {
+  display: block;
+  text-align: left;
 }
 </style>
