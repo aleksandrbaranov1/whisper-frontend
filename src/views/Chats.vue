@@ -19,18 +19,29 @@
 
     <!-- Зона сообщений -->
     <main class="chat-window">
-      <div v-if="selectedChat && messages.length" class="messages">
-        <div
-          v-for="message in messages"
-          :key="message.id"
-          :class="['message', { own: message.senderId === currentUserId }]"
-        >
-          {{ message.content }}
-          <div class="timestamp">
-            {{ formatTime(message.timestamp) }}
+      <div v-if="selectedChat" class="chat-content">
+        <div class="messages" ref="messagesContainer">
+          <div
+            v-for="message in messages"
+            :key="message.id"
+            :class="['message', { own: message.senderId === currentUserId }]"
+          >
+            {{ message.content }}
+            <div class="timestamp">{{ formatTime(message.timestamp) }}</div>
           </div>
         </div>
+
+        <div class="message-input">
+          <input
+            type="text"
+            v-model="newMessage"
+            @keyup.enter="sendMessage"
+            placeholder="Введите сообщение..."
+          />
+          <button @click="sendMessage">-></button>
+        </div>
       </div>
+
       <div v-else class="placeholder">
         <p>Выберите чат, чтобы просмотреть сообщения</p>
       </div>
@@ -39,12 +50,17 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from "vue";
+import { ref, onMounted, onBeforeUnmount, nextTick } from "vue";
+import SockJS from "sockjs-client";
+import { Client } from "@stomp/stompjs";
 
 const chats = ref([]);
 const messages = ref([]);
 const selectedChat = ref(null);
 const currentUserId = ref(null);
+const newMessage = ref("");
+const messagesContainer = ref(null);
+const stompClient = ref(null);
 
 const fetchProfile = async () => {
   const token = localStorage.getItem("token");
@@ -68,6 +84,9 @@ const fetchChats = async () => {
 const selectChat = async (chat) => {
   selectedChat.value = chat;
   await fetchMessages(chat.id);
+  await nextTick(() => {
+    scrollToBottom();
+  });
 };
 
 const fetchMessages = async (chatId) => {
@@ -80,6 +99,39 @@ const fetchMessages = async (chatId) => {
     return;
   }
   messages.value = await res.json();
+  await nextTick(() => {
+    scrollToBottom();
+  });
+};
+
+const sendMessage = () => {
+  if (
+    !newMessage.value.trim() ||
+    !selectedChat.value ||
+    !stompClient.value ||
+    !stompClient.value.connected
+  )
+    return;
+
+  const messagePayload = {
+    senderId: currentUserId.value,
+    chatId: selectedChat.value.id,
+    content: newMessage.value.trim(),
+  };
+
+  stompClient.value.publish({
+    destination: "/app/chat.send", // совпадает с @MessageMapping на сервере
+    body: JSON.stringify(messagePayload),
+  });
+
+  newMessage.value = "";
+};
+
+const scrollToBottom = () => {
+  const container = messagesContainer.value;
+  if (container) {
+    container.scrollTop = container.scrollHeight;
+  }
 };
 
 const getOtherParticipantName = (participants) => {
@@ -99,8 +151,46 @@ onMounted(async () => {
   try {
     await fetchProfile();
     await fetchChats();
+
+    const token = localStorage.getItem("token");
+    const socket = new SockJS("http://localhost:8080/ws");
+
+    stompClient.value = new Client({
+      webSocketFactory: () => socket,
+      connectHeaders: {
+        Authorization: `Bearer ${token}`,
+      },
+      debug: (str) => {
+        console.log("[STOMP]", str);
+      },
+      reconnectDelay: 5000,
+      onConnect: () => {
+        console.log("STOMP connected");
+
+        stompClient.value.subscribe("/topic/chat", (message) => {
+          const body = JSON.parse(message.body);
+          console.log("New message", body);
+
+          if (selectedChat.value && body.chatId === selectedChat.value.id) {
+            messages.value.push(body);
+            nextTick(() => scrollToBottom());
+          }
+        });
+      },
+      onStompError: (frame) => {
+        console.error("STOMP error", frame.headers.message);
+      },
+    });
+
+    stompClient.value.activate();
   } catch (e) {
     console.error(e);
+  }
+});
+
+onBeforeUnmount(() => {
+  if (stompClient.value) {
+    stompClient.value.deactivate();
   }
 });
 </script>
@@ -136,7 +226,6 @@ onMounted(async () => {
   font-size: 22px;
   cursor: pointer;
 }
-
 .profile-button:hover {
   background-color: #666;
 }
@@ -147,7 +236,6 @@ onMounted(async () => {
   overflow-y: auto;
   padding: 0 10px;
 }
-
 .chat-item {
   padding: 12px;
   margin-bottom: 8px;
@@ -155,11 +243,9 @@ onMounted(async () => {
   background-color: #3a3a4a;
   cursor: pointer;
 }
-
 .chat-item.selected {
   background-color: #5a5a7a;
 }
-
 .chat-item:hover {
   background-color: #505060;
 }
@@ -169,24 +255,25 @@ onMounted(async () => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 20px;
-  overflow-y: auto;
+  padding: 0;
+  overflow: hidden;
 }
-
-.placeholder {
-  margin: auto;
-  text-align: center;
-  color: #888;
-  font-size: 18px;
+.chat-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
 }
-
-/* Сообщения */
 .messages {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  overflow-y: auto;
+  padding: 20px;
+  padding-bottom: 80px;
 }
-
 .message {
   max-width: 60%;
   padding: 10px 15px;
@@ -196,7 +283,6 @@ onMounted(async () => {
   word-break: break-word;
   position: relative;
 }
-
 .message.own {
   background-color: #0088cc;
   align-self: flex-end;
@@ -208,15 +294,62 @@ onMounted(async () => {
   color: #bbb;
   margin-top: 4px;
   user-select: none;
+  text-align: left;
 }
-
-/* Выровнять по правому краю для своих сообщений */
 .message.own .timestamp {
   text-align: right;
 }
 
-/* Для чужих сообщений выравнивание по левому краю (по умолчанию) */
-.message .timestamp {
-  text-align: left;
+/* Поле ввода сообщения */
+.message-input {
+  display: flex;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 12px 16px;
+  background-color: #1e1e2f;
+  border-top: 1px solid #333;
+  gap: 8px;
+  align-items: center;
+}
+
+.message-input input {
+  flex: 1;
+  height: 48px;
+  width: 1095;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: none;
+  font-size: 16px;
+  box-sizing: border-box;
+}
+
+.message-input button {
+  height: 48px;
+  width: 48px; /* Сделайте кнопку квадратной для лучшего центрирования */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background-color: #0088cc;
+  color: white;
+  cursor: pointer;
+  font-size: 20px; /* Можно увеличить для лучшей видимости */
+  white-space: nowrap;
+}
+
+.message-input button:hover {
+  background-color: #0077b3;
+}
+
+/* Заглушка */
+.placeholder {
+  margin: auto;
+  text-align: center;
+  color: #888;
+  font-size: 18px;
 }
 </style>
