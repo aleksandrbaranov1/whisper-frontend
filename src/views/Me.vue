@@ -5,6 +5,7 @@
       <p><strong>Имя:</strong> {{ user.name }}</p>
       <p><strong>Email:</strong> {{ user.email }}</p>
       <p><strong>Роль:</strong> {{ user.role }}</p>
+      <button class="logout-btn" @click="logout">Выйти</button>
     </div>
     <div v-else class="profile-loading">
       <p>Загрузка...</p>
@@ -18,6 +19,12 @@ export default {
     return {
       user: null,
     };
+  },
+  methods: {
+    logout() {
+      localStorage.removeItem("token");
+      this.$router.push("/login");
+    },
   },
   async created() {
     const token = localStorage.getItem("token");
@@ -88,5 +95,23 @@ h2 {
   text-align: center;
   color: #bbb;
   font-size: 16px;
+}
+
+.logout-btn {
+  margin-top: 24px;
+  width: 100%;
+  padding: 12px 0;
+  background: #ff3b3b;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.logout-btn:hover {
+  background: #d32f2f;
 }
 </style>

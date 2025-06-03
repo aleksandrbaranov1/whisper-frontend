@@ -1,7 +1,7 @@
 <template>
   <div class="chat-page">
     <!-- Боковая панель -->
-    <aside class="sidebar">
+    <aside class="sidebar" :style="{ width: sidebarWidth + 'px' }">
       <div class="sidebar-header">
         <button class="profile-button" @click="$router.push('/me')">👤</button>
         <button
@@ -42,14 +42,21 @@
       <div class="chat-list" v-if="!showSearch">
         <div
           class="chat-item"
-          v-for="chat in chats"
+          v-for="chat in sortedChats"
           :key="chat.id"
           @click="selectChat(chat)"
           :class="{ selected: selectedChat && selectedChat.id === chat.id }"
         >
-          {{ getOtherParticipantName(chat.participants) }}
+          <div class="chat-item-title">
+            {{ getOtherParticipantName(chat.participants) }}
+          </div>
+          <div class="chat-item-last">
+            {{ chat.lastMessage ? chat.lastMessage.content : "Нет сообщений" }}
+          </div>
         </div>
       </div>
+
+      <div class="sidebar-resizer" @mousedown="startResizing"></div>
     </aside>
 
     <!-- Зона сообщений -->
@@ -61,14 +68,25 @@
           </span>
         </div>
         <div class="messages" ref="messagesContainer">
-          <div
-            v-for="message in messages"
-            :key="message.id"
-            :class="['message', { own: message.senderId === currentUserId }]"
-          >
-            {{ message.content }}
-            <div class="timestamp">{{ formatTime(message.timestamp) }}</div>
-          </div>
+          <template v-for="(message, idx) in messages" :key="message.id">
+            <!-- Разделитель дат -->
+            <div
+              v-if="
+                idx === 0 ||
+                formatDate(message.timestamp) !==
+                  formatDate(messages[idx - 1].timestamp)
+              "
+              class="date-separator"
+            >
+              <span>{{ formatDate(message.timestamp) }}</span>
+            </div>
+            <div
+              :class="['message', { own: message.senderId === currentUserId }]"
+            >
+              {{ message.content }}
+              <div class="timestamp">{{ formatTime(message.timestamp) }}</div>
+            </div>
+          </template>
         </div>
 
         <div class="message-input">
@@ -90,7 +108,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, nextTick } from "vue";
+import { ref, onMounted, onBeforeUnmount, nextTick, computed } from "vue";
 import SockJS from "sockjs-client";
 import { Client } from "@stomp/stompjs";
 
@@ -190,6 +208,14 @@ const formatTime = (timestamp) => {
   return `${hours}:${minutes}`;
 };
 
+const formatDate = (timestamp) => {
+  const date = new Date(timestamp);
+  return date.toLocaleDateString("ru-RU", {
+    day: "numeric",
+    month: "long",
+  });
+};
+
 const toggleSearch = () => {
   showSearch.value = !showSearch.value;
   searchQuery.value = "";
@@ -245,6 +271,18 @@ const startChatWith = async (user) => {
   }
 };
 
+const sortedChats = computed(() => {
+  return [...chats.value].sort((a, b) => {
+    const aTime = a.lastMessage?.timestamp
+      ? Date.parse(a.lastMessage.timestamp)
+      : 0;
+    const bTime = b.lastMessage?.timestamp
+      ? Date.parse(b.lastMessage.timestamp)
+      : 0;
+    return bTime - aTime;
+  });
+});
+
 onMounted(async () => {
   try {
     await fetchProfile();
@@ -265,14 +303,18 @@ onMounted(async () => {
       onConnect: () => {
         console.log("STOMP connected");
 
+        // Подписка на сообщения в текущем чате
         stompClient.value.subscribe("/topic/chat", (message) => {
           const body = JSON.parse(message.body);
-          console.log("New message", body);
-
           if (selectedChat.value && body.chatId === selectedChat.value.id) {
             messages.value.push(body);
             nextTick(() => scrollToBottom());
           }
+        });
+
+        // Подписка на обновление списка чатов
+        stompClient.value.subscribe("/topic/chats", () => {
+          fetchChats();
         });
       },
       onStompError: (frame) => {
@@ -291,6 +333,34 @@ onBeforeUnmount(() => {
     stompClient.value.deactivate();
   }
 });
+
+const sidebarWidth = ref(260);
+let resizing = false;
+
+function startResizing(e) {
+  resizing = true;
+  document.body.style.cursor = "ew-resize";
+}
+
+function stopResizing() {
+  resizing = false;
+  document.body.style.cursor = "";
+}
+
+function onMouseMove(e) {
+  if (resizing) {
+    sidebarWidth.value = Math.max(180, Math.min(500, e.clientX));
+  }
+}
+
+onMounted(() => {
+  window.addEventListener("mousemove", onMouseMove);
+  window.addEventListener("mouseup", stopResizing);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener("mousemove", onMouseMove);
+  window.removeEventListener("mouseup", stopResizing);
+});
 </script>
 
 <style scoped>
@@ -304,7 +374,9 @@ onBeforeUnmount(() => {
 
 /* Сайдбар */
 .sidebar {
-  width: 260px;
+  position: relative;
+  min-width: 180px;
+  max-width: 500px;
   background-color: #2d2d3a;
   display: flex;
   flex-direction: column;
@@ -324,7 +396,7 @@ onBeforeUnmount(() => {
 
 .profile-button,
 .new-chat-button {
-  margin: 0; /* Убираем внешние отступы */
+  margin: 0;
 }
 
 /* Кнопка профиля */
@@ -434,8 +506,7 @@ onBeforeUnmount(() => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  position: relative;
-  overflow: hidden;
+  min-height: 0;
 }
 .messages {
   flex: 1;
@@ -443,7 +514,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 10px;
   overflow-y: auto;
-  padding: 20px;
+  padding: 20px 20px 4px 20px; /* нижний padding уменьшен */
 }
 .message {
   max-width: 60%;
@@ -474,18 +545,16 @@ onBeforeUnmount(() => {
 /* Поле ввода сообщения */
 .message-input {
   display: flex;
-  padding: 12px 16px;
+  padding: 8px 16px 4px 16px;
   background-color: #1e1e2f;
   border-top: 1px solid #333;
   gap: 8px;
-  align-items: center;
 }
 
 .message-input input {
   flex: 1;
-  height: 48px;
-  width: 1095;
-  padding: 0 14px;
+  height: 44px;
+  padding: 0 12px;
   border-radius: 8px;
   border: none;
   font-size: 16px;
@@ -493,8 +562,8 @@ onBeforeUnmount(() => {
 }
 
 .message-input button {
-  height: 48px;
-  width: 48px; /* Сделайте кнопку квадратной для лучшего центрирования */
+  height: 44px;
+  width: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -504,12 +573,9 @@ onBeforeUnmount(() => {
   background-color: #0088cc;
   color: white;
   cursor: pointer;
-  font-size: 20px; /* Можно увеличить для лучшей видимости */
+  font-size: 20px;
   white-space: nowrap;
-}
-
-.message-input button:hover {
-  background-color: #0077b3;
+  margin-top: 0;
 }
 body {
   font-family: "Inter", Arial, sans-serif;
@@ -536,5 +602,60 @@ body {
 .chat-title {
   display: block;
   text-align: left;
+}
+
+.chat-item-title {
+  font-weight: 600;
+  font-size: 16px;
+  color: #fff;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-item-last {
+  font-size: 14px;
+  color: #bbb;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+/* Разделитель дат */
+.date-separator {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 18px 0 8px 0;
+  width: 100%;
+}
+
+.date-separator > span {
+  padding: 4px 18px;
+  border-radius: 16px;
+  background: rgba(44, 44, 59, 0.7);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  display: inline-block;
+}
+
+/* Ресайзер сайдбара */
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: ew-resize;
+  background: transparent;
+  z-index: 10;
+}
+.sidebar-resizer:hover {
+  background: #0088cc33;
 }
 </style>
