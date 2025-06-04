@@ -132,6 +132,7 @@ const stompClient = ref(null);
 const showSearch = ref(false);
 const searchQuery = ref("");
 const filteredUsers = ref([]);
+let readSubs = [];
 
 const fetchProfile = async () => {
   const token = localStorage.getItem("token");
@@ -158,6 +159,8 @@ const selectChat = async (chat) => {
   await nextTick(() => {
     scrollToBottom();
   });
+
+  subscribeAllChats();
 };
 
 const fetchMessages = async (chatId) => {
@@ -333,6 +336,21 @@ const sortedChats = computed(() => {
   });
 });
 
+const subscribeAllChats = () => {
+  // Отписаться от старых подписок
+  readSubs.forEach((sub) => sub.unsubscribe());
+  readSubs = [];
+  chats.value.forEach((chat) => {
+    const sub = stompClient.value.subscribe(`/topic/chat/${chat.id}`, (msg) => {
+      const { messageIds } = JSON.parse(msg.body);
+      messages.value.forEach((m) => {
+        if (messageIds.includes(m.id)) m.isRead = true;
+      });
+    });
+    readSubs.push(sub);
+  });
+};
+
 onMounted(async () => {
   try {
     await fetchProfile();
@@ -353,6 +371,9 @@ onMounted(async () => {
       onConnect: () => {
         console.log("STOMP connected");
 
+        // Подписка на все чаты пользователя!
+        subscribeAllChats();
+
         // Подписка на сообщения в текущем чате
         stompClient.value.subscribe("/topic/chat", (message) => {
           const body = JSON.parse(message.body);
@@ -366,6 +387,19 @@ onMounted(async () => {
         stompClient.value.subscribe("/topic/chats", () => {
           fetchChats();
         });
+
+        // Подписка на обновление статуса прочтения сообщений
+        if (selectedChat.value) {
+          stompClient.value.subscribe(
+            `/topic/chat/${selectedChat.value.id}`,
+            (msg) => {
+              const { messageIds } = JSON.parse(msg.body);
+              messages.value.forEach((m) => {
+                if (messageIds.includes(m.id)) m.isRead = true;
+              });
+            }
+          );
+        }
       },
       onStompError: (frame) => {
         console.error("STOMP error", frame.headers.message);
@@ -382,6 +416,8 @@ onBeforeUnmount(() => {
   if (stompClient.value) {
     stompClient.value.deactivate();
   }
+  readSubs.forEach((sub) => sub.unsubscribe());
+  readSubs = [];
 });
 
 const sidebarWidth = ref(260);
