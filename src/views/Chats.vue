@@ -53,6 +53,10 @@
           <div class="chat-item-last">
             {{ chat.lastMessage ? chat.lastMessage.content : "Нет сообщений" }}
           </div>
+
+          <span v-if="chat.unreadCount > 0" class="unread-badge">{{
+            chat.unreadCount
+          }}</span>
         </div>
       </div>
 
@@ -85,6 +89,12 @@
             >
               {{ message.content }}
               <div class="timestamp">{{ formatTime(message.timestamp) }}</div>
+              <div
+                v-if="!message.isRead && message.senderId === currentUserId"
+                class="unread-label"
+              >
+                непрочитано
+              </div>
             </div>
           </template>
         </div>
@@ -159,7 +169,28 @@ const fetchMessages = async (chatId) => {
     messages.value = [];
     return;
   }
-  messages.value = await res.json();
+  // Преобразуем read -> isRead
+  messages.value = (await res.json()).map((msg) => ({
+    ...msg,
+    isRead: msg.read,
+  }));
+
+  // Отметить как прочитанные только чужие сообщения
+  const unreadIds = messages.value
+    .filter((msg) => !msg.isRead && msg.senderId !== currentUserId.value)
+    .map((msg) => msg.id);
+
+  await markMessagesAsRead(unreadIds);
+
+  // После запроса повторно обновлять isRead не нужно —
+  // при следующем fetchMessages сервер вернёт актуальный статус для всех сообщений (и для своих, и для чужих)
+  // Если хочешь мгновенно убрать маркер у своих сообщений:
+  messages.value.forEach((msg) => {
+    if (msg.senderId === currentUserId.value && msg.isRead) {
+      // Маркер исчезнет, потому что isRead уже true
+    }
+  });
+
   await nextTick(() => {
     scrollToBottom();
   });
@@ -268,6 +299,25 @@ const startChatWith = async (user) => {
     if (newChat) selectChat(newChat);
   } else {
     alert("Не удалось создать чат");
+  }
+};
+
+const markMessagesAsRead = async (messageIds) => {
+  console.log("markMessagesAsRead вызвана с:", messageIds);
+  if (!messageIds.length) return;
+  const token = localStorage.getItem("token");
+  try {
+    const res = await fetch("http://localhost:8080/messages/mark-read", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + token,
+      },
+      body: JSON.stringify({ messageIds }),
+    });
+    console.log("Ответ mark-read:", res.status, await res.text());
+  } catch (e) {
+    console.error("Ошибка запроса mark-read:", e);
   }
 };
 
@@ -529,6 +579,10 @@ onBeforeUnmount(() => {
   background-color: #0088cc;
   align-self: flex-end;
 }
+.message.unread {
+  box-shadow: 0 0 0 2px #ff3b3b55;
+  background-color: #4a4a5a;
+}
 
 /* Время сообщения */
 .timestamp {
@@ -657,5 +711,38 @@ body {
 }
 .sidebar-resizer:hover {
   background: #0088cc33;
+}
+
+/* Значок непрочитанных сообщений */
+.unread-badge {
+  background: #ff3b3b;
+  color: #fff;
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 13px;
+  margin-left: 8px;
+  font-weight: 600;
+  min-width: 24px;
+  text-align: center;
+  display: inline-block;
+}
+
+/* Точка для непрочитанных сообщений */
+.unread-dot {
+  display: inline-block;
+  margin-left: 8px;
+  width: 8px;
+  height: 8px;
+  background: #ff3b3b;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.unread-label {
+  color: #dad9d9;
+  font-size: 12px;
+  margin-top: 2px;
+  text-align: right;
+  font-style: italic;
 }
 </style>
