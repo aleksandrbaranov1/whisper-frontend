@@ -45,6 +45,7 @@
           v-for="chat in sortedChats"
           :key="chat.id"
           @click="selectChat(chat)"
+          @contextmenu.prevent="showContextMenu($event, chat)"
           :class="{ selected: selectedChat && selectedChat.id === chat.id }"
         >
           <div class="chat-item-title">
@@ -53,11 +54,28 @@
           <div class="chat-item-last">
             {{ chat.lastMessage ? chat.lastMessage.content : "Нет сообщений" }}
           </div>
-
-          <span v-if="chat.unreadCount > 0" class="unread-badge">{{
-            chat.unreadCount
-          }}</span>
+          <span v-if="chat.unreadCount > 0" class="unread-badge">
+            {{ chat.unreadCount }}
+          </span>
         </div>
+      </div>
+
+      <!-- Контекстное меню -->
+      <div
+        v-if="contextMenu.visible"
+        class="context-menu"
+        :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
+        @click="contextMenu.visible = false"
+      >
+        <button class="delete-btn" @click.stop="deleteChat(contextMenu.chat)">
+          Удалить чат
+        </button>
+      </div>
+
+      <!-- Уведомление об удалении -->
+      <div v-if="pendingDelete.visible" class="delete-toast">
+        Чат будет удалён через {{ pendingDelete.seconds }} сек.
+        <button class="undo-btn" @click="undoDelete">Отменить</button>
       </div>
 
       <div class="sidebar-resizer" @mousedown="startResizing"></div>
@@ -133,6 +151,20 @@ const showSearch = ref(false);
 const searchQuery = ref("");
 const filteredUsers = ref([]);
 let readSubs = [];
+
+const contextMenu = ref({
+  visible: false,
+  x: 0,
+  y: 0,
+  chat: null,
+});
+
+const pendingDelete = ref({
+  visible: false,
+  chat: null,
+  timer: null,
+  seconds: 5,
+});
 
 const fetchProfile = async () => {
   const token = localStorage.getItem("token");
@@ -235,6 +267,76 @@ const getOtherParticipantName = (participants) => {
   return other ? other.name : "Неизвестный";
 };
 
+function showContextMenu(e, chat) {
+  contextMenu.value.visible = true;
+  contextMenu.value.x = e.clientX;
+  contextMenu.value.y = e.clientY;
+  contextMenu.value.chat = chat;
+  // Закрыть меню при клике вне его
+  setTimeout(() => {
+    window.addEventListener("click", closeContextMenu);
+  }, 0);
+}
+function closeContextMenu() {
+  contextMenu.value.visible = false;
+  window.removeEventListener("click", closeContextMenu);
+}
+
+const deleteChat = async (chat) => {
+  contextMenu.value.visible = false;
+  // Показываем уведомление и запускаем таймер
+  pendingDelete.value = {
+    visible: true,
+    chat,
+    timer: null,
+    seconds: 5,
+  };
+
+  // Таймер обратного отсчёта
+  pendingDelete.value.timer = setInterval(() => {
+    if (pendingDelete.value.seconds > 1) {
+      pendingDelete.value.seconds--;
+    } else {
+      clearInterval(pendingDelete.value.timer);
+      pendingDelete.value.visible = false;
+      // Только теперь реально удаляем чат
+      doDeleteChat(chat);
+    }
+  }, 1000);
+};
+
+const undoDelete = () => {
+  clearInterval(pendingDelete.value.timer);
+  pendingDelete.value.visible = false;
+};
+
+const doDeleteChat = async (chat) => {
+  const token = localStorage.getItem("token");
+  try {
+    const res = await fetch(
+      `http://localhost:8080/api/chats/deleteChat/${chat.id}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: "Bearer " + token,
+        },
+      }
+    );
+    if (res.ok) {
+      if (selectedChat.value && selectedChat.value.id === chat.id) {
+        selectedChat.value = null;
+        messages.value = [];
+      }
+      await fetchChats();
+    } else {
+      alert("Ошибка удаления чата");
+    }
+  } catch (e) {
+    alert("Ошибка удаления чата");
+  }
+};
+
+// ...остальные функции...
 const formatTime = (timestamp) => {
   const date = new Date(timestamp);
   const hours = date.getHours().toString().padStart(2, "0");
@@ -780,5 +882,66 @@ body {
   margin-top: 2px;
   text-align: right;
   font-style: italic;
+}
+
+/* Контекстное меню */
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: #232336;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 8px 0;
+  min-width: 120px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
+}
+.delete-btn {
+  width: 100%;
+  background: none;
+  border: none;
+  color: #ff3b3b;
+  font-size: 15px;
+  padding: 8px 16px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 0;
+}
+.delete-btn:hover {
+  background: #3a3a4a;
+}
+
+/* Уведомление об удалении */
+.delete-toast {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 18px;
+  margin: 0 auto;
+  background: #232336;
+  color: #fff;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 12px 18px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 2000;
+  max-width: 90%;
+  min-width: 180px;
+  font-size: 15px;
+  gap: 12px;
+}
+.undo-btn {
+  background: none;
+  border: none;
+  color: #0088cc;
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+  padding: 0 8px;
+}
+.undo-btn:hover {
+  text-decoration: underline;
 }
 </style>
