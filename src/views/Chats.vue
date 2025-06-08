@@ -52,7 +52,13 @@
             {{ getOtherParticipantName(chat.participants) }}
           </div>
           <div class="chat-item-last">
-            {{ chat.lastMessage ? chat.lastMessage.content : "Нет сообщений" }}
+            <template v-if="chat.lastMessage">
+              <span v-if="chat.lastMessage.senderId === currentUserId"
+                >Вы:
+              </span>
+              {{ chat.lastMessage.content }}
+            </template>
+            <template v-else> Нет сообщений </template>
           </div>
           <span v-if="chat.unreadCount > 0" class="unread-badge">
             {{ chat.unreadCount }}
