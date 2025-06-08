@@ -104,6 +104,7 @@
             </div>
             <div
               :class="['message', { own: message.senderId === currentUserId }]"
+              @contextmenu="showMessageContextMenu($event, message)"
             >
               {{ message.content }}
               <div class="timestamp">{{ formatTime(message.timestamp) }}</div>
@@ -115,6 +116,19 @@
               </div>
             </div>
           </template>
+          <!-- Контекстное меню для сообщений -->
+          <div
+            v-if="messageContextMenu.visible"
+            class="context-menu"
+            :style="{
+              top: messageContextMenu.y + 'px',
+              left: messageContextMenu.x + 'px',
+            }"
+          >
+            <button class="delete-btn" @click="deleteMessage">
+              Удалить сообщение
+            </button>
+          </div>
         </div>
 
         <div class="message-input">
@@ -164,6 +178,14 @@ const pendingDelete = ref({
   chat: null,
   timer: null,
   seconds: 5,
+});
+
+// Контекстное меню для сообщений
+const messageContextMenu = ref({
+  visible: false,
+  x: 0,
+  y: 0,
+  message: null,
 });
 
 const fetchProfile = async () => {
@@ -336,6 +358,55 @@ const doDeleteChat = async (chat) => {
   }
 };
 
+// Контекстное меню для сообщений
+function showMessageContextMenu(e, message) {
+  e.preventDefault();
+  messageContextMenu.value.visible = true;
+  messageContextMenu.value.x = e.clientX;
+  messageContextMenu.value.y = e.clientY;
+  messageContextMenu.value.message = message;
+  setTimeout(() => {
+    window.addEventListener("click", closeMessageContextMenu);
+  }, 0);
+}
+function closeMessageContextMenu() {
+  messageContextMenu.value.visible = false;
+  window.removeEventListener("click", closeMessageContextMenu);
+}
+
+const deleteMessage = async () => {
+  const { message } = messageContextMenu.value;
+  if (!message) return;
+  const token = localStorage.getItem("token");
+  try {
+    const res = await fetch(
+      `http://localhost:8080/messages/delete/${selectedChat.value.id}/${message.id}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: "Bearer " + token,
+        },
+      }
+    );
+    if (res.ok || res.status === 204) {
+      messages.value = messages.value.filter((msg) => msg.id !== message.id);
+      await fetchChats();
+      // Найти обновлённый чат и присвоить его в selectedChat
+      const updated = chats.value.find((c) => c.id === selectedChat.value.id);
+      if (updated) selectedChat.value = updated;
+      // Обновить сообщения и lastMessage
+      if (selectedChat.value) {
+        await fetchMessages(selectedChat.value.id);
+      }
+    } else {
+      alert("Ошибка удаления сообщения");
+    }
+  } catch (e) {
+    alert("Ошибка удаления сообщения");
+  }
+  closeMessageContextMenu();
+};
+
 // ...остальные функции...
 const formatTime = (timestamp) => {
   const date = new Date(timestamp);
@@ -443,6 +514,7 @@ const subscribeAllChats = () => {
   readSubs.forEach((sub) => sub.unsubscribe());
   readSubs = [];
   chats.value.forEach((chat) => {
+    // Подписка на обновление статуса прочтения сообщений
     const sub = stompClient.value.subscribe(`/topic/chat/${chat.id}`, (msg) => {
       const { messageIds } = JSON.parse(msg.body);
       messages.value.forEach((m) => {
@@ -450,6 +522,27 @@ const subscribeAllChats = () => {
       });
     });
     readSubs.push(sub);
+
+    // Подписка на удаление сообщений
+    const subDelete = stompClient.value.subscribe(
+      `/topic/chats/${chat.id}/deleted`,
+      async (msg) => {
+        const data = JSON.parse(msg.body);
+
+        // Обновить список чатов и подписки
+        await fetchChats();
+        subscribeAllChats();
+
+        // Если чат открыт — обновить сообщения
+        if (
+          selectedChat.value &&
+          String(data.chatId) === String(selectedChat.value.id)
+        ) {
+          await fetchMessages(selectedChat.value.id);
+        }
+      }
+    );
+    readSubs.push(subDelete);
   });
 };
 
