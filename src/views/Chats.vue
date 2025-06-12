@@ -134,17 +134,38 @@
             <button class="delete-btn" @click="deleteMessage">
               Удалить сообщение
             </button>
+            <button
+              class="edit-btn"
+              v-if="
+                messageContextMenu.message &&
+                messageContextMenu.message.senderId === currentUserId
+              "
+              @click="startEditMessage"
+            >
+              Редактировать
+            </button>
           </div>
         </div>
 
         <div class="message-input">
           <input
-            type="text"
-            v-model="newMessage"
-            @keyup.enter="sendMessage"
-            placeholder="Введите сообщение..."
+            id="message-input"
+            :value="editingMessage ? editingContent : newMessage"
+            @input="
+              editingMessage
+                ? (editingContent = $event.target.value)
+                : (newMessage = $event.target.value)
+            "
+            @keyup.enter="editingMessage ? editMessage() : sendMessage()"
+            :placeholder="
+              editingMessage
+                ? 'Редактирование сообщения...'
+                : 'Введите сообщение...'
+            "
           />
-          <button @click="sendMessage">-></button>
+          <button @click="editingMessage ? editMessage() : sendMessage()">
+            ->
+          </button>
         </div>
       </div>
 
@@ -193,6 +214,9 @@ const messageContextMenu = ref({
   y: 0,
   message: null,
 });
+
+const editingMessage = ref(null); // объект сообщения, если редактируем
+const editingContent = ref(""); // текст для редактирования
 
 const fetchProfile = async () => {
   const token = localStorage.getItem("token");
@@ -367,9 +391,25 @@ const doDeleteChat = async (chat) => {
 // Контекстное меню для сообщений
 function showMessageContextMenu(e, message) {
   e.preventDefault();
+  // Размеры меню (примерно, можно уточнить)
+  const menuWidth = 160;
+  const menuHeight = 90;
+  const padding = 8;
+
+  let x = e.clientX;
+  let y = e.clientY;
+
+  // Проверка выхода за правый и нижний край
+  if (x + menuWidth > window.innerWidth - padding) {
+    x = window.innerWidth - menuWidth - padding;
+  }
+  if (y + menuHeight > window.innerHeight - padding) {
+    y = window.innerHeight - menuHeight - padding;
+  }
+
   messageContextMenu.value.visible = true;
-  messageContextMenu.value.x = e.clientX;
-  messageContextMenu.value.y = e.clientY;
+  messageContextMenu.value.x = x;
+  messageContextMenu.value.y = y;
   messageContextMenu.value.message = message;
   setTimeout(() => {
     window.addEventListener("click", closeMessageContextMenu);
@@ -411,6 +451,47 @@ const deleteMessage = async () => {
     alert("Ошибка удаления сообщения");
   }
   closeMessageContextMenu();
+};
+
+function startEditMessage() {
+  editingMessage.value = messageContextMenu.value.message;
+  editingContent.value = editingMessage.value.content;
+  messageContextMenu.value.visible = false;
+  nextTick(() => {
+    const input = document.getElementById("edit-message-input");
+    if (input) input.focus();
+  });
+}
+
+const editMessage = async () => {
+  if (!editingMessage.value || !editingContent.value.trim()) return;
+  const token = localStorage.getItem("token");
+  try {
+    const res = await fetch(
+      `http://localhost:8080/messages/edit/${
+        editingMessage.value.id
+      }/${encodeURIComponent(editingContent.value)}`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: "Bearer " + token,
+        },
+      }
+    );
+    if (res.ok) {
+      const updated = await res.json();
+      // Обновить сообщение в списке
+      const idx = messages.value.findIndex((m) => m.id === updated.id);
+      if (idx !== -1)
+        messages.value[idx] = { ...messages.value[idx], ...updated };
+      editingMessage.value = null;
+      editingContent.value = "";
+    } else {
+      alert("Ошибка при редактировании сообщения");
+    }
+  } catch (e) {
+    alert("Ошибка при редактировании сообщения");
+  }
 };
 
 // ...остальные функции...
@@ -643,11 +724,27 @@ function onMouseMove(e) {
 onMounted(() => {
   window.addEventListener("mousemove", onMouseMove);
   window.addEventListener("mouseup", stopResizing);
+
+  // Обработчик Esc для выхода из чата
+  window.addEventListener("keydown", onEscKey);
 });
 onBeforeUnmount(() => {
   window.removeEventListener("mousemove", onMouseMove);
   window.removeEventListener("mouseup", stopResizing);
+
+  window.removeEventListener("keydown", onEscKey);
 });
+
+function onEscKey(e) {
+  if (e.key === "Escape") {
+    selectedChat.value = null;
+    messages.value = [];
+    editingMessage.value = null;
+    editingContent.value = "";
+    messageContextMenu.value.visible = false;
+    contextMenu.value.visible = false;
+  }
+}
 </script>
 
 <style scoped>
@@ -1007,6 +1104,22 @@ body {
 }
 .delete-btn:hover {
   background: #3a3a4a;
+}
+.edit-btn {
+  width: 100%;
+  background: none;
+  border: none;
+  color: #0088cc;
+  font-size: 15px;
+  padding: 8px 16px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 0;
+  transition: background 0.2s, color 0.2s;
+}
+.edit-btn:hover {
+  background: #0088cc;
+  color: #fff;
 }
 
 /* Уведомление об удалении */
