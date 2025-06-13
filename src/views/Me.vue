@@ -5,6 +5,29 @@
       <p><strong>Имя:</strong> {{ user.name }}</p>
       <p><strong>Email:</strong> {{ user.email }}</p>
       <p><strong>Роль:</strong> {{ user.role }}</p>
+
+      <!-- Блок "О себе" -->
+      <div v-if="user.bio !== null">
+        <div v-if="!editingBio">
+          <p class="bio-label"><strong>О себе:</strong></p>
+          <p class="bio-text">{{ user.bio }}</p>
+          <button class="edit-btn" @click="startEditBio">Редактировать</button>
+        </div>
+        <div v-else>
+          <textarea v-model="bioDraft" rows="3" class="bio-input"></textarea>
+          <button class="save-btn" @click="saveBio">Сохранить</button>
+          <button class="cancel-btn" @click="cancelEditBio">Отмена</button>
+        </div>
+      </div>
+      <div v-else>
+        <button class="edit-btn" @click="startEditBio">Добавить "О себе"</button>
+        <div v-if="editingBio">
+          <textarea v-model="bioDraft" rows="3" class="bio-input"></textarea>
+          <button class="save-btn" @click="saveBio">Сохранить</button>
+          <button class="cancel-btn" @click="cancelEditBio">Отмена</button>
+        </div>
+      </div>
+
       <button class="logout-btn" @click="logout">Выйти</button>
     </div>
     <div v-else class="profile-loading">
@@ -18,12 +41,43 @@ export default {
   data() {
     return {
       user: null,
+      editingBio: false,
+      bioDraft: "",
     };
   },
   methods: {
     logout() {
       localStorage.removeItem("token");
       this.$router.push("/login");
+    },
+    startEditBio() {
+      this.editingBio = true;
+      this.bioDraft = this.user.bio || "";
+    },
+    cancelEditBio() {
+      this.editingBio = false;
+      this.bioDraft = this.user.bio || "";
+    },
+    async saveBio() {
+      const token = localStorage.getItem("token");
+      try {
+        const res = await fetch("http://localhost:8080/api/profile/updateBio", {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + token,
+          },
+          body: JSON.stringify({
+            userId: this.user.id,
+            bio: this.bioDraft,
+          }),
+        });
+        if (!res.ok) throw new Error("Ошибка при обновлении 'О себе'");
+        this.user = await res.json();
+        this.editingBio = false;
+      } catch (error) {
+        alert(error.message);
+      }
     },
   },
   async created() {
@@ -113,5 +167,52 @@ h2 {
 
 .logout-btn:hover {
   background: #d32f2f;
+}
+
+.bio-label {
+  margin-top: 16px;
+  margin-bottom: 4px;
+}
+
+.bio-text {
+  margin-bottom: 8px;
+  white-space: pre-line;
+}
+
+.bio-input {
+  width: 100%;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  padding: 8px;
+  font-size: 15px;
+  color: #232336;
+}
+
+.edit-btn,
+.save-btn,
+.cancel-btn {
+  margin-right: 8px;
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: none;
+  background: #0088cc;
+  color: #fff;
+  cursor: pointer;
+  font-size: 15px;
+  transition: background 0.2s;
+}
+
+.cancel-btn {
+  background: #444;
+}
+
+.edit-btn:hover,
+.save-btn:hover {
+  background: #0077b3;
+}
+
+.cancel-btn:hover {
+  background: #666;
 }
 </style>
